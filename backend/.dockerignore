@@ -1,7 +1,11 @@
 .venv
 __pycache__
 *.pyc
-.env
+.env*
+*.key
+*.pem
+*.p12
+*.pfx
 .pytest_cache
 tests/
 *.egg-info

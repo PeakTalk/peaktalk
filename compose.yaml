@@ -1,0 +1,115 @@
+name: peaktalk-local
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: peaktalk_local
+      POSTGRES_USER: peaktalk_local
+      POSTGRES_PASSWORD: local-only-password
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U peaktalk_local -d peaktalk_local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.31.0
+    command:
+      - "--smtp-auth-accept-any"
+      - "--smtp-auth-allow-insecure"
+    ports:
+      - "127.0.0.1:8025:8025"
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://peaktalk_local:local-only-password@postgres:5432/peaktalk_local
+      REDIS_URL: redis://redis:6379/0
+      BETTER_AUTH_SESSION_URL: http://frontend:3000/api/auth/get-session
+      BETTER_AUTH_API_URL: http://frontend:3000/api/auth
+      FRONTEND_URL: http://localhost:3000
+      ALLOWED_ORIGINS: http://localhost:3000
+      PAYMENTS_ENABLED: "false"
+    command:
+      - sh
+      - -ec
+      - |
+        alembic upgrade head
+        exec gunicorn app.main:app \
+          --worker-class uvicorn.workers.UvicornWorker \
+          --workers 2 \
+          --bind 0.0.0.0:8000 \
+          --timeout 120 \
+          --access-logfile - \
+          --error-logfile -
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_HCAPTCHA_SITEKEY: local-disabled-placeholder
+    env_file:
+      - ./frontend/.env.local
+    environment:
+      BETTER_AUTH_DATABASE_URL: postgresql://peaktalk_local:local-only-password@postgres:5432/peaktalk_local
+      BETTER_AUTH_SECRET: local-development-placeholder-change-before-deployment
+      BETTER_AUTH_URL: http://localhost:3000
+      BETTER_AUTH_TRUSTED_ORIGINS: http://localhost:3000
+      AUTH_MAIL_CAPTURE_URL: ""
+      EMAIL_FROM_ADDRESS: PeakTalk Local <noreply@localhost>
+      AUTH_SMTP_HOST: mailpit
+      AUTH_SMTP_PORT: "1025"
+      AUTH_SMTP_SECURE: "false"
+      AUTH_SMTP_USER: local
+      AUTH_SMTP_PASSWORD: local-only-password
+      RESEND_API_KEY: ""
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

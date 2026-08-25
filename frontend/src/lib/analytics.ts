@@ -1,6 +1,9 @@
 import { captureUTM, getUTM } from './utm';
 
-export const METRIKA_ID = 108419591;
+const configuredMetrikaId = Number(process.env.NEXT_PUBLIC_METRIKA_ID ?? 0);
+export const METRIKA_ID = Number.isFinite(configuredMetrikaId)
+  ? configuredMetrikaId
+  : 0;
 
 export const ANALYTICS_EVENTS = {
   landingCtaClicked: 'landing_cta_clicked',
@@ -33,7 +36,7 @@ type MetrikaWindow = Window & {
 };
 
 export function trackEvent(event: AnalyticsEventName, props: AnalyticsProps = {}): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || !METRIKA_ID) return;
 
   try {
     const analyticsWindow = window as MetrikaWindow;

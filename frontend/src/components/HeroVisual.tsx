@@ -37,7 +37,7 @@ export default function HeroVisual({ compact = false }: HeroVisualProps) {
 
         <div className={`${compact ? 'h-[196px]' : 'h-[338px] lg:h-[398px]'} relative overflow-hidden bg-[#f7f3eb]`}>
           <Image
-            src="/mockup screen.png"
+            src="/product-simulation.png"
             alt="PeakTalk показывает материал встречи, слабое место позиции и вопрос для стресс-теста"
             width={1586}
             height={992}

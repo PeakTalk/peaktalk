@@ -1,0 +1,26 @@
+PeakTalk — source-available engineering review snapshot
+Copyright (c) 2026 PeakTalk. All rights reserved.
+
+This repository is publicly visible for inspection and engineering review. It
+is not distributed under an open-source license. No additional copyright
+license is granted beyond rights necessarily provided by the GitHub Terms of
+Service, applicable law, or a separate written agreement. In particular, this
+notice does not grant a general right to modify, redistribute, sublicense,
+sell, independently host, or operate the PeakTalk source code or documentation.
+
+Publishing on GitHub does grant platform-specific rights described by GitHub's
+Terms of Service, including rights associated with viewing and forking a public
+repository through the Service. Those terms control where this notice cannot
+limit them. A public fork may remain available after the original repository is
+removed or made private.
+
+GitHub Terms of Service:
+https://docs.github.com/en/site-policy/github-terms/github-terms-of-service
+
+Third-party packages and assets remain subject to their respective licenses and
+notices. Their inclusion does not change the rights in PeakTalk's original
+code, product materials, name, or visual identity. Redistributed assets and
+their upstream terms are listed in THIRD_PARTY_NOTICES.md.
+
+THE MATERIAL IS PROVIDED FOR REVIEW "AS IS", WITHOUT WARRANTIES OR CONDITIONS
+OF ANY KIND, TO THE MAXIMUM EXTENT PERMITTED BY LAW.

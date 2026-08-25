@@ -1,0 +1,256 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Filter changed paths
+        id: filter
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          backend=false
+          frontend=false
+
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]] || ! git cat-file -e "${BASE_SHA}^{commit}"; then
+            backend=true
+            frontend=true
+          else
+            while IFS= read -r path; do
+              case "${path}" in
+                backend/*)
+                  backend=true
+                  ;;
+                frontend/*)
+                  frontend=true
+                  ;;
+                compose.yaml|.github/workflows/ci.yml)
+                  backend=true
+                  frontend=true
+                  ;;
+              esac
+            done < <(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+          fi
+
+          printf 'backend=%s\n' "${backend}" >> "${GITHUB_OUTPUT}"
+          printf 'frontend=%s\n' "${frontend}" >> "${GITHUB_OUTPUT}"
+
+  backend:
+    name: Backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install locked dependencies
+        working-directory: backend
+        run: python -m pip install --disable-pip-version-check -r requirements.lock
+
+      - name: Verify dependency consistency
+        working-directory: backend
+        run: python -m pip check
+
+      - name: Run backend tests
+        working-directory: backend
+        run: python -m pytest
+
+  frontend:
+    name: Frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BETTER_AUTH_DATABASE_URL: postgresql://local_ci:local-only-password@127.0.0.1:5432/local_ci
+      BETTER_AUTH_SECRET: local-ci-placeholder-change-before-deployment
+      BETTER_AUTH_URL: http://localhost:3000
+      BETTER_AUTH_TRUSTED_ORIGINS: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_HCAPTCHA_SITEKEY: local-disabled-placeholder
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Install locked dependencies
+        working-directory: frontend
+        run: npm ci --ignore-scripts --no-audit
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Type-check
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install checksum-verified scanners
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          readonly gitleaks_version="8.18.4"
+          readonly gitleaks_sha256="ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d"
+          readonly zizmor_version="1.29.0"
+          readonly zizmor_sha256="dd96df044a6e8538d5f423790f453bdd03d49e5b2bcc38214acc41a2f1297839"
+
+          tools_dir="$(mktemp -d "${RUNNER_TEMP}/peaktalk-security-tools.XXXXXX")"
+          download_dir="$(mktemp -d "${RUNNER_TEMP}/peaktalk-security-downloads.XXXXXX")"
+          gitleaks_archive="${download_dir}/gitleaks.tar.gz"
+          zizmor_archive="${download_dir}/zizmor.tar.gz"
+
+          curl --fail --silent --show-error --location \
+            --retry 3 --retry-all-errors --connect-timeout 10 --max-time 120 \
+            --proto '=https' --tlsv1.2 \
+            --output "${gitleaks_archive}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${gitleaks_version}/gitleaks_${gitleaks_version}_linux_x64.tar.gz"
+          printf '%s  %s\n' "${gitleaks_sha256}" "${gitleaks_archive}" | sha256sum --check --strict -
+          tar --extract --gzip --file "${gitleaks_archive}" --directory "${tools_dir}" gitleaks
+
+          curl --fail --silent --show-error --location \
+            --retry 3 --retry-all-errors --connect-timeout 10 --max-time 120 \
+            --proto '=https' --tlsv1.2 \
+            --output "${zizmor_archive}" \
+            "https://github.com/zizmorcore/zizmor/releases/download/v${zizmor_version}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          printf '%s  %s\n' "${zizmor_sha256}" "${zizmor_archive}" | sha256sum --check --strict -
+          tar --extract --gzip --file "${zizmor_archive}" --directory "${tools_dir}" zizmor
+
+          chmod 0755 "${tools_dir}/gitleaks" "${tools_dir}/zizmor"
+          printf '%s\n' "${tools_dir}" >> "${GITHUB_PATH}"
+
+      - name: Verify Gitleaks detector canary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          canary_dir="$(mktemp -d "${RUNNER_TEMP}/gitleaks-canary.XXXXXX")"
+          canary_file="${canary_dir}/canary.txt"
+          {
+            printf '%s' 'api_key = "'
+            printf '%s' 'a1B2c3D4e5F6g7H8'
+            printf '%s' 'i9J0k1L2m3N4o5P6'
+            printf '%s\n' '"'
+          } > "${canary_file}"
+
+          set +e
+          gitleaks detect \
+            --source "${canary_dir}" \
+            --no-git \
+            --redact \
+            --no-banner \
+            --no-color \
+            --log-level error \
+            --exit-code 42 \
+            > /dev/null 2>&1
+          result=$?
+          set -e
+
+          if [[ "${result}" -ne 42 ]]; then
+            echo "::error::Gitleaks did not detect the synthetic canary (exit ${result})."
+            exit 1
+          fi
+
+      - name: Scan complete Git history for secrets
+        shell: bash
+        run: >-
+          gitleaks detect --source . --log-opts="--all --full-history"
+          --redact --no-banner --no-color
+
+      - name: Audit GitHub Actions workflows
+        shell: bash
+        run: >-
+          zizmor --offline --strict-collection --persona=pedantic
+          --no-progress --color=never .github/workflows
+
+  gate:
+    name: CI gate
+    if: always()
+    needs:
+      - changes
+      - backend
+      - frontend
+      - security
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    env:
+      CHANGES_RESULT: ${{ needs.changes.result }}
+      BACKEND_RESULT: ${{ needs.backend.result }}
+      FRONTEND_RESULT: ${{ needs.frontend.result }}
+      SECURITY_RESULT: ${{ needs.security.result }}
+    steps:
+      - name: Require successful applicable checks
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [[ "${CHANGES_RESULT}" == "success" ]]
+          [[ "${BACKEND_RESULT}" == "success" || "${BACKEND_RESULT}" == "skipped" ]]
+          [[ "${FRONTEND_RESULT}" == "success" || "${FRONTEND_RESULT}" == "skipped" ]]
+          [[ "${SECURITY_RESULT}" == "success" ]]

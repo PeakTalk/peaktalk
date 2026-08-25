@@ -25,16 +25,17 @@ export function MaintenanceScreen() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: 'easeOut' }}
         >
-          <div className="relative mb-10">
+          <div className="relative mb-10 flex justify-center">
             <div className="absolute inset-0 -m-6 rounded-full bg-[radial-gradient(circle,rgba(232,96,10,0.08),transparent_70%)]" />
-            <video
-              className="relative mx-auto w-full max-w-[280px] mix-blend-screen"
-              src="/maintenance/patience-clock.mp4"
-              autoPlay
-              loop
-              muted
-              playsInline
-            />
+            <motion.div
+              className="relative flex h-36 w-36 items-center justify-center rounded-full border border-amber-200 bg-white/80 shadow-[0_18px_50px_rgba(232,96,10,0.12)]"
+              animate={{ rotate: [0, 4, -4, 0] }}
+              transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+              aria-hidden="true"
+            >
+              <div className="absolute inset-4 rounded-full border border-dashed border-amber-300" />
+              <Wrench className="relative text-amber-700" size={42} strokeWidth={1.5} />
+            </motion.div>
           </div>
         </motion.div>
 
